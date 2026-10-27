@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Сонячна система</title>
+<style>
+:root{color-scheme:dark;--bg:#05070f;--ink:#e8e6df;--dim:#8c93a6;--line:#232a3d;--panel:#0d1220;--sun:#ffc94a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif}
+body{display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto}
+header{padding:8px 14px 2px}
+h1{margin:0;font:600 19px/1.2 Georgia,"Iowan Old Style",serif}
+header p{margin:2px 0 0;color:var(--dim);font-size:11.5px}
+#stage{flex:none;height:min(100vw,58vh);min-height:300px;position:sticky;top:0;z-index:2;background:var(--bg)}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab}
+.ctl{display:flex;gap:8px;align-items:center;padding:4px 14px;flex-wrap:wrap}
+.ctl:first-of-type{border-top:1px solid var(--line)}
+button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
+button[aria-pressed=true]{border-color:var(--sun);color:var(--sun)}
+button:focus-visible,input:focus-visible,.row:focus-visible{outline:2px solid var(--sun);outline-offset:2px}
+input[type=range]{flex:1;min-width:80px;accent-color:var(--sun)}
+#date{font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px;min-width:96px;text-align:right}
+#info{padding:4px 14px 0;font-size:13px;min-height:5.4em}
+#list{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;padding:2px 14px 8px}
+.row{background:none;border:0;border-radius:6px;text-align:left;padding:2px 4px}
+.row.sel{background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}
+.row b{font-weight:600}.row i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+.row small{display:block;color:var(--dim);font-size:11px}
+.bar{height:3px;border-radius:2px;margin-top:2px}
+@media (min-width:760px){#list{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Сонячна система</h1>
+  <p>Реальні орбіти та періоди обертання; планети стоять там, де вони сьогодні. Тягніть, щоб рухати, щипком або колесом — масштабувати.</p>
+</header>
+<div id="stage"><canvas id="cv" aria-label="Модель Сонячної системи"></canvas></div>
+<div class="ctl">
+  <button id="pp">Пауза</button>
+  <input id="spd" type="range" min="0" max="3.3" step="0.05" value="1.2" aria-label="Швидкість часу">
+  <span id="date"></span>
+</div>
+<div class="ctl">
+  <button id="mode"></button>
+  <input id="zs" type="range" min="-0.3" max="4.3" step="0.01" value="0" aria-label="Масштаб">
+  <button id="rs">Скинути вигляд</button>
+</div>
+<div class="ctl">
+  <button id="tr" aria-pressed="false">Сліди</button>
+  <button id="mo" aria-pressed="false">Супутники</button>
+  <button id="ab" aria-pressed="true">Пояс астероїдів</button>
+  <button id="fl" aria-pressed="false">Стежити за планетою</button>
+</div>
+<div id="info"></div>
+<div id="list"></div>
+<script>
+const P=[
+{n:'Меркурій',a:.387,e:.2056,T:87.97,L:252.25,w:77.46,c:'#b9b3ab',r:2.6,m:[]},
+{n:'Венера',a:.723,e:.0068,T:224.7,L:181.98,w:131.53,c:'#e8c98a',r:4,m:[]},
+{n:'Земля',a:1,e:.0167,T:365.25,L:100.46,w:102.94,c:'#5aa7ff',r:4.2,m:[['Місяць',27.32]]},
+{n:'Марс',a:1.524,e:.0934,T:687,L:355.45,w:336.04,c:'#e0663f',r:3.3,m:[['Фобос',.319],['Деймос',1.263]]},
+{n:'Юпітер',a:5.203,e:.0489,T:4332.6,L:34.4,w:14.75,c:'#d9a878',r:8.5,m:[['Іо',1.769],['Європа',3.551],['Ганімед',7.155],['Каліста',16.69]]},
+{n:'Сатурн',a:9.537,e:.0565,T:10759,L:49.94,w:92.43,c:'#e6d29a',r:7,ring:1,m:[['Енцелад',1.37],['Рея',4.518],['Титан',15.945]]},
+{n:'Уран',a:19.19,e:.0472,T:30687,L:313.23,w:170.96,c:'#8fe3e6',r:5.5,m:[['Титанія',8.706],['Оберон',13.46]]},
+{n:'Нептун',a:30.07,e:.0086,T:60190,L:304.88,w:44.97,c:'#5470ff',r:5.5,m:[['Тритон',-5.877]]}];
+const GM=1.32712e11,AU=1.496e8,D2R=Math.PI/180,$=id=>document.getElementById(id);
+P.forEach(p=>p.v=2*Math.PI*p.a*AU/(p.T*86400));
+const RK=[2440,6052,6371,3390,69911,58232,25362,24622];
+const MD=[[],[],[384400],[9376,23463],[421700,671000,1070400,1882700],[238040,527070,1221870],[435910,583520],[354760]],MS=[[],[],[1737],[11.3,6.2],[1822,1561,2634,2410],[252,764,2575],[789,761],[1353]];let visM=0;
+const fmt=(x,d=1)=>x.toFixed(d).replace('.',',');
+const per=T=>T<700?Math.round(T)+' дн':fmt(T/365.25)+' р.';
+const cv=$('cv'),ctx=cv.getContext('2d'),list=$('list'),info=$('info');
+const d0=(Date.now()-946728000000)/86400000;
+let sim=0,paused=false,sel=2,W=0,H=0,Kr=1,Ks=1,sc=1,stars=[],real=true,zoom=1,ox=0,oy=0,follow=false,trails=false,moons=false,belt=true;
+list.innerHTML=P.map((p,i)=>`<button class="row" data-i="${i}"><i style="background:${p.c}"></i><b>${p.n}</b><small>рік ${per(p.T)} · ${fmt(p.v)} км/с</small><div class="bar" style="width:${Math.max(6,p.v/47.4*100)}%;background:${p.c}"></div></button>`).join('');
+const rows=[...list.children];
+function select(i){sel=i;rows.forEach((r,j)=>r.classList.toggle('sel',j===i))}
+rows.forEach((r,i)=>r.onclick=()=>select(i));select(sel);
+const setPress=(b,v)=>b.setAttribute('aria-pressed',v);
+function modeLabel(){$('mode').textContent='Масштаб: '+(real?'реальний':'стиснутий')}modeLabel();
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1,2),b=cv.getBoundingClientRect();
+  W=b.width;H=b.height;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+  const h=Math.min(W,H)/2*.92;Kr=h/30.4;Ks=h/Math.sqrt(30.4);sc=Math.min(1,Math.min(W,H)/520)+.3;
+  stars=Array.from({length:130},()=>({x:Math.random()*W,y:Math.random()*H,s:Math.random()*1.2+.2,o:Math.random()*.6+.2}));
+}
+new ResizeObserver(resize).observe($('stage'));
+const f=r=>(real?r*Kr:Math.sqrt(r)*Ks)*zoom;
+const proj=(r,th)=>{const R=f(r);return[W/2+ox+R*Math.cos(th),H/2+oy-R*Math.sin(th)]};
+function kep(p,t){
+  const M=(((p.L-p.w)+360*t/p.T)%360)*D2R;let E=M;
+  for(let i=0;i<7;i++)E=M+p.e*Math.sin(E);
+  const nu=Math.atan2(Math.sqrt(1-p.e*p.e)*Math.sin(E),Math.cos(E)-p.e);
+  return[p.a*(1-p.e*Math.cos(E)),nu+p.w*D2R];
+}
+function orbit(p,hi){
+  ctx.beginPath();
+  const NS=zoom>300?1440:360;for(let i=0;i<=NS;i++){
+    const nu=i/NS*2*Math.PI,r=p.a*(1-p.e*p.e)/(1+p.e*Math.cos(nu)),[x,y]=proj(r,nu+p.w*D2R);i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.strokeStyle=hi?p.c:'#2a3250';ctx.lineWidth=hi?1.6:1;ctx.globalAlpha=hi?.9:.8;ctx.stroke();ctx.globalAlpha=1;
+}
+function trail(p,t){
+  const N=70,span=.45*p.T;let prev=null;
+  ctx.strokeStyle=p.c;ctx.lineWidth=2;ctx.lineCap='round';
+  for(let j=0;j<=N;j++){
+    const [r,th]=kep(p,t-j*span/N),q=proj(r,th);
+    if(prev){ctx.globalAlpha=.7*(1-j/N)**1.5;ctx.beginPath();ctx.moveTo(prev[0],prev[1]);ctx.lineTo(q[0],q[1]);ctx.stroke()}
+    prev=q;
+  }
+  ctx.globalAlpha=1;
+}
+const A=[];while(A.length<900){const a=2.1+Math.random()*1.2;if([[2.5,.025],[2.82,.02],[2.95,.015],[3.27,.02]].some(g=>Math.abs(a-g[0])<g[1]))continue;A.push({a,e:Math.random()*.2,w:Math.random()*360,L:Math.random()*360,T:365.25*Math.pow(a,1.5)})}
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.1,(now-last)/1000);last=now;
+  if(!paused)sim+=dt*Math.pow(10,+$('spd').value);
+  const t=d0+sim;
+  if(follow){const[r,th]=kep(P[sel],t),R=f(r);ox=-R*Math.cos(th);oy=R*Math.sin(th)}
+  ctx.clearRect(0,0,W,H);
+  stars.forEach(s=>{ctx.fillStyle=`rgba(255,255,255,${s.o})`;ctx.fillRect(s.x,s.y,s.s,s.s)});
+  P.forEach((p,i)=>orbit(p,i===sel));
+  if(trails)P.forEach(p=>trail(p,t));
+  if(belt){ctx.fillStyle='rgba(190,175,150,.75)';A.forEach(s=>{const[r,th]=kep(s,t),[x,y]=proj(r,th);ctx.fillRect(x-.6,y-.6,1.3,1.3)})}
+  const cx=W/2+ox,cy=H/2+oy,rs=real?Math.max(2.5,695700/AU*Kr*zoom):9*sc,sr=rs*2.4+6,g=ctx.createRadialGradient(cx,cy,0,cx,cy,sr);
+  g.addColorStop(0,'#fff6c8');g.addColorStop(rs/sr,'#ffc94a');g.addColorStop(1,'rgba(255,170,40,0)');
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,sr,0,7);ctx.fill();
+  P.forEach((p,i)=>{
+    const[r,th]=kep(p,t),[x,y]=proj(r,th),rad=real?Math.max(1.6,RK[i]/AU*Kr*zoom):p.r*sc;p.q={x,y,r};
+    if(p.ring){ctx.strokeStyle='#cdbb8a';ctx.lineWidth=1.5;ctx.beginPath();ctx.ellipse(x,y,rad*2,rad*.7,-.4,0,7);ctx.stroke()}
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(x,y,rad,0,7);ctx.fill();
+    if(i===sel){ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.beginPath();ctx.arc(x,y,rad+5,0,7);ctx.stroke()}
+    ctx.fillStyle=i===sel?'#fff':'#9aa2b8';ctx.font='11px system-ui,sans-serif';ctx.fillText(p.n,x+rad+6,y-rad-2);
+    if(i===sel)visM=0;if(moons)p.m.forEach((m,k)=>{
+      const Rm=real?MD[i][k]/AU*Kr*zoom:rad+7+k*5,a=2*Math.PI*t/m[1]+k*1.7,mx=x+Rm*Math.cos(a),my=y-Rm*Math.sin(a);if(real&&Rm<rad+2)return;if(i===sel)visM++;
+      ctx.strokeStyle='rgba(180,190,210,.25)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(x,y,Rm,0,7);ctx.stroke();
+      ctx.fillStyle='#d8dbe6';ctx.beginPath();ctx.arc(mx,my,real?Math.max(1.2,MS[i][k]/AU*Kr*zoom):1.9,0,7);ctx.fill();
+      if(i===sel){ctx.fillStyle='#aab';ctx.font='10px system-ui,sans-serif';ctx.fillText(m[0],mx+4,my+3)}
+    });
+  });
+  const p=P[sel],q=p.q,v=Math.sqrt(GM*(2/(q.r*AU)-1/(p.a*AU)));
+  info.innerHTML=`<b style="color:${p.c}">${p.n}</b>: зараз ${fmt(q.r,2)} а.о. від Сонця, швидкість ${fmt(v,2)} км/с (ближче до Сонця — швидше). Радіус ${RK[sel].toLocaleString('uk-UA')} км.${real&&zoom<3000?' Щоб побачити реальний розмір, збільшуйте масштаб і ввімкніть «Стежити за планетою».':''}`+(moons&&p.m.length?(real?` Супутників видно: ${visM} з ${p.m.length}${visM<p.m.length?' (збільшуйте масштаб)':''}.`:` Супутників на схемі: ${p.m.length}.`):'');
+  $('date').textContent=new Date(Date.now()+sim*86400000).toLocaleDateString('uk-UA',{day:'numeric',month:'short',year:'numeric'});
+  requestAnimationFrame(frame);
+}
+function setZoom(z){z=Math.min(20000,Math.max(.5,z));const k=z/zoom;ox*=k;oy*=k;zoom=z;$('zs').value=Math.log10(z)}
+$('zs').oninput=e=>setZoom(Math.pow(10,+e.target.value));
+$('mode').onclick=()=>{real=!real;modeLabel()};
+$('rs').onclick=()=>{zoom=1;ox=oy=0;follow=false;setPress($('fl'),false);$('zs').value=0};
+$('tr').onclick=()=>{trails=!trails;setPress($('tr'),trails)};
+$('mo').onclick=()=>{moons=!moons;setPress($('mo'),moons)};
+$('ab').onclick=()=>{belt=!belt;setPress($('ab'),belt)};
+$('fl').onclick=()=>{follow=!follow;setPress($('fl'),follow);if(!follow)ox=oy=0};
+$('pp').onclick=e=>{paused=!paused;e.target.textContent=paused?'Пуск':'Пауза'};
+cv.addEventListener('wheel',e=>{e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*.003))},{passive:false});
+const ptr=new Map();let pinch0=1,moved=0;
+const dist=()=>{const[a,b]=[...ptr.values()];return Math.hypot(a.x-b.x,a.y-b.y)||1};
+cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);ptr.set(e.pointerId,{x:e.clientX,y:e.clientY});moved=0;if(ptr.size===2)pinch0=dist()};
+cv.onpointermove=e=>{
+  const p=ptr.get(e.pointerId);if(!p)return;
+  const dx=e.clientX-p.x,dy=e.clientY-p.y;p.x=e.clientX;p.y=e.clientY;moved+=Math.abs(dx)+Math.abs(dy);
+  if(ptr.size===1){if(moved>6&&!follow){ox+=dx;oy+=dy}}
+  else if(ptr.size===2){const d=dist();setZoom(zoom*d/pinch0);pinch0=d}
+};
+cv.onpointerup=e=>{
+  if(ptr.size===1&&moved<6){
+    const b=cv.getBoundingClientRect(),x=e.clientX-b.left,y=e.clientY-b.top;let best=-1,bd=900;
+    P.forEach((p,i)=>{const d=(p.q.x-x)**2+(p.q.y-y)**2;if(d<bd){bd=d;best=i}});
+    if(best>=0)select(best);
+  }
+  ptr.delete(e.pointerId);
+};
+cv.onpointercancel=e=>ptr.delete(e.pointerId);
+resize();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
